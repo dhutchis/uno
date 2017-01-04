@@ -98,4 +98,18 @@
       <!-- End Hadoop 2 requirements -->
     </value>
   </property>
+
+
+
+<property>
+  <name>trace.span.receiver.tracer.span.min.ms</name>
+  <value>100</value>
+</property>
+
+<property>  
+    <name>table.split.threshold</name>  
+    <value>10G</value> 
+  </property> 
+
+  
 </configuration>
