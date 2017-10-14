@@ -21,14 +21,19 @@ function download_verify() {
   tarball=$2
   expected_hash=$3
 
-  wget -c -P "$DOWNLOADS" "$url_prefix/$tarball"
+  if [ -n "$apache_mirror" ]; then
+    wget -c -P "$DOWNLOADS" "$url_prefix/$tarball"
+  fi 
   verify_exist_hash "$tarball" "$expected_hash"
   echo "$tarball exists in downloads/ and matches expected checksum ($expected_hash)"
 }
 
 function fetch_accumulo() {
-  download_verify "$APACHE_MIRROR/zookeeper/zookeeper-$ZOOKEEPER_VERSION" "$ZOOKEEPER_TARBALL" "$ZOOKEEPER_HASH"
-  download_verify "$APACHE_MIRROR/hadoop/common/hadoop-$HADOOP_VERSION" "$HADOOP_TARBALL" "$HADOOP_HASH"
+  if [[ $1 != "--no-deps" ]]; then
+    download_verify "$apache_mirror/zookeeper/zookeeper-$ZOOKEEPER_VERSION" "$ZOOKEEPER_TARBALL" "$ZOOKEEPER_HASH"
+    download_verify "$apache_mirror/hadoop/common/hadoop-$HADOOP_VERSION" "$HADOOP_TARBALL" "$HADOOP_HASH"
+  fi
+
   if [[ -n "$ACCUMULO_REPO" ]]; then
     rm -f "$DOWNLOADS/$ACCUMULO_TARBALL"
     pushd .
@@ -48,22 +53,14 @@ function fetch_accumulo() {
     popd
     cp "$accumulo_built_tarball" "$DOWNLOADS"/
   else
-    download_verify "$APACHE_MIRROR/accumulo/$ACCUMULO_VERSION" "$ACCUMULO_TARBALL" "$ACCUMULO_HASH"
+    download_verify "$apache_mirror/accumulo/$ACCUMULO_VERSION" "$ACCUMULO_TARBALL" "$ACCUMULO_HASH"
   fi
 }
 
-# Determine best apache mirror to use
-APACHE_MIRROR=$(curl -sk https://apache.org/mirrors.cgi?as_json | grep preferred | cut -d \" -f 4)
-
-case "$1" in
-spark)
-  download_verify "$APACHE_MIRROR/spark/spark-$SPARK_VERSION" "$SPARK_TARBALL" "$SPARK_HASH"
-  ;;
-accumulo)
-  fetch_accumulo
-  ;;
-fluo)
-  fetch_accumulo
+function fetch_fluo() {
+  if [[ $1 != "--no-deps" ]]; then
+    fetch_accumulo
+  fi
   if [[ -n "$FLUO_REPO" ]]; then
     rm -f "$DOWNLOADS/$FLUO_TARBALL"
     cd "$FLUO_REPO"
@@ -72,15 +69,56 @@ fluo)
     fluo_built_tarball=$FLUO_REPO/modules/distribution/target/$FLUO_TARBALL
     if [[ ! -f "$fluo_built_tarball" ]]; then
       echo "The tarball $fluo_built_tarball does not exist after building from the FLUO_REPO=$FLUO_REPO"
-      echo "Does your repo contain code matching the FLUO_VERSION=$FLUO_VERSION set in env.sh?"
+      echo "Does your repo contain code matching the FLUO_VERSION=$FLUO_VERSION set in uno.conf?"
       exit 1
     fi
     cp "$fluo_built_tarball" "$DOWNLOADS"/
   else
-    [[ $FLUO_VERSION =~ .*-incubating ]] && APACHE_MIRROR="${APACHE_MIRROR}/incubator"
-    download_verify "$APACHE_MIRROR/fluo/fluo/$FLUO_VERSION" "$FLUO_TARBALL" "$FLUO_HASH"
+    [[ $FLUO_VERSION =~ .*-incubating ]] && apache_mirror="${apache_mirror}/incubator"
+    download_verify "$apache_mirror/fluo/fluo/$FLUO_VERSION" "$FLUO_TARBALL" "$FLUO_HASH"
+  fi
+}
+
+# Determine best apache mirror to use
+apache_mirror=$(curl -sk https://apache.org/mirrors.cgi?as_json | grep preferred | cut -d \" -f 4)
+
+if [ -z "$apache_mirror" ]; then
+  echo "Failed querying apache.org for best download mirror!"
+  echo "Fetch can only verify existing downloads or build Accumulo/Fluo tarballs from a repo."
+fi
+
+case "$1" in
+spark)
+  download_verify "$apache_mirror/spark/spark-$SPARK_VERSION" "$SPARK_TARBALL" "$SPARK_HASH"
+  ;;
+accumulo)
+  fetch_accumulo "$2"
+  ;;
+fluo)
+  fetch_fluo "$2"
+  ;;
+fluo-yarn)
+  if [[ $2 != "--no-deps" ]]; then
+    fetch_fluo
+  fi
+  if [[ -n "$FLUO_YARN_REPO" ]]; then
+    rm -f "$DOWNLOADS/$FLUO_YARN_TARBALL"
+    cd "$FLUO_YARN_REPO"
+    mvn clean package -DskipTests -Dformatter.skip
+
+    built_tarball=$FLUO_YARN_REPO/distribution/target/$FLUO_YARN_TARBALL
+    if [[ ! -f "$built_tarball" ]]; then
+      echo "The tarball $built_tarball does not exist after building from the FLUO_YARN_REPO=$FLUO_YARN_REPO"
+      echo "Does your repo contain code matching the FLUO_YARN_VERSION=$FLUO_YARN_VERSION set in uno.conf?"
+      exit 1
+    fi
+    cp "$built_tarball" "$DOWNLOADS"/
+  else
+    [[ $FLUO_VERSION =~ .*-incubating ]] && apache_mirror="${apache_mirror}/incubator"
+    download_verify "$apache_mirror/fluo/fluo/$FLUO_VERSION" "$FLUO_TARBALL" "$FLUO_HASH"
   fi
   ;;
+ 
 metrics)
   if [[ "$OSTYPE" == "darwin"* ]]; then
     echo "The metrics services (InfluxDB and Grafana) are not supported on Mac OS X at this time."
@@ -99,7 +137,7 @@ metrics)
   download_verify https://s3.amazonaws.com/influxdb "$INFLUXDB_TARBALL" "$INFLUXDB_HASH"
 
   tar xzf "$DOWNLOADS/$INFLUXDB_TARBALL" -C "$BUILD"
-  mv "$BUILD"/influxdb_"$INFLUXDB_VERSION"_x86_64 "$IF_PATH"
+  mv "$BUILD/influxdb_$INFLUXDB_VERSION_x86_64" "$IF_PATH"
   mkdir "$IF_PATH"/bin
   mv "$IF_PATH/opt/influxdb/versions/$INFLUXDB_VERSION"/* "$IF_PATH"/bin
   rm -rf "$IF_PATH"/opt
@@ -121,9 +159,11 @@ metrics)
   echo "Usage: uno fetch <component>"
   echo -e "\nPossible components:\n"
   echo "    all        Fetches all binary tarballs of the following components"
-  echo "    accumulo   Downloads Accumulo, Hadoop & Zookeeper. Builds Accumulo if repo set in env.sh"
-  echo "    fluo       Downloads Fluo, Accumulo, Hadoop & Zookeeper. Builds Fluo or Accumulo if repo set in env.sh"
+  echo "    accumulo   Downloads Accumulo, Hadoop & Zookeeper. Builds Accumulo if repo set in uno.conf"
+  echo "    fluo       Downloads Fluo, Accumulo, Hadoop & Zookeeper. Builds Fluo or Accumulo if repo set in uno.conf"
   echo "    metrics    Downloads InfluxDB and Grafana"
   echo "    spark      Downloads Spark"
+  echo "Options:"
+  echo "    --no-deps  Dependencies will be fetched unless this option is specified. Only works for fluo & accumulo components."
   exit 1
 esac

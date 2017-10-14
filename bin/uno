@@ -36,7 +36,7 @@ fetch)
     "$bin"/impl/fetch.sh spark && \
     "$bin"/impl/fetch.sh metrics
   else
-    "$bin"/impl/fetch.sh "$2"
+    "$bin"/impl/fetch.sh "$2" "$3"
   fi
 	;;
 setup)
@@ -47,10 +47,13 @@ setup)
       "$bin"/impl/setup-metrics.sh
       ;;
     accumulo)
-      "$bin"/impl/setup-accumulo.sh $3
+      "$bin"/impl/setup-accumulo.sh "$3"
       ;;
     fluo)
-      "$bin"/impl/setup-fluo.sh $3
+      "$bin"/impl/setup-fluo.sh "$3"
+      ;;
+    fluo-yarn)
+      "$bin"/impl/setup-fluo-yarn.sh "$3"
       ;;
     spark)
       "$bin"/impl/setup-spark.sh
@@ -65,6 +68,7 @@ setup)
       echo "    accumulo   Sets up Apache Accumulo and its dependencies (Hadoop & Zookeeper)"
       echo "    spark      Sets up Apache Spark"
       echo "    fluo       Sets up Apache Fluo and its dependencies (Accumulo, Hadoop, & Zookeeper)"
+      echo "    fluo-yarn  Sets up Apache Fluo YARN and its dependencies (Fluo, Accumulo, Hadoop, & Zookeeper)"
       echo -e "    metrics    Sets up metrics service (InfluxDB + Grafana)\n"
       echo "Options:"
       echo "    --no-deps  Dependencies will be setup unless this option is specified. Only works for fluo & accumulo components."
@@ -95,7 +99,7 @@ version)
   echo -e "Usage: uno <command> (<argument>)\n"
   echo -e "Possible commands:\n"
   echo "  fetch <component>      Fetches binary tarballs of component and it dependencies by either building or downloading"
-  echo "                         the tarball (as configured by env.sh). Run 'uno fetch all' to fetch all binary tarballs."
+  echo "                         the tarball (as configured by uno.conf). Run 'uno fetch all' to fetch all binary tarballs."
   echo "                         Run 'uno fetch' for a list of possible components."
   echo "  setup <component>      Sets up component and its dependencies (clearing any existing data)"
   echo "                         Run 'uno setup' for list of components."
